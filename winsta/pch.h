@@ -11,5 +11,6 @@
 
 #include <Windows.h>
 #include <stdio.h>
+#include <WtsApi32.h>
 
 #endif //PCH_H
