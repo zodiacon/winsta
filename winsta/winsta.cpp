@@ -19,15 +19,33 @@ enum class WindowStationState {
 };
 
 void DoEnumDesktopWindows(PCWSTR name) {
-	auto hdesk = ::OpenDesktop(name, 0, FALSE, DESKTOP_ENUMERATE | DESKTOP_READOBJECTS);
+	auto hdesk = ::OpenDesktop(name, 0, FALSE, DESKTOP_ENUMERATE);
 	if (!hdesk) {
 		printf("--- failed to open desktop %ws (%d)\n", name, ::GetLastError());
 		return;
 	}
+	static WCHAR pname[MAX_PATH];
 	::EnumDesktopWindows(hdesk, [](auto hwnd, auto) -> BOOL {
 		static WCHAR text[128];
 		if (::IsWindowVisible(hwnd) && ::GetWindowText(hwnd, text, 128) > 0) {
-			printf("  HWND: 0x%08X: %ws\n", (DWORD)(DWORD_PTR)hwnd, text);
+			DWORD pid;
+			auto tid = ::GetWindowThreadProcessId(hwnd, &pid);
+			auto hProcess = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+			BOOL exeNameFound = FALSE;
+			PWSTR exeName = nullptr;
+			if (hProcess) {
+				DWORD size = MAX_PATH;
+				exeNameFound = ::QueryFullProcessImageName(hProcess, 0, pname, &size);
+				::CloseHandle(hProcess);
+				if (exeNameFound) {
+					exeName = ::wcsrchr(pname, L'\\');
+					if (exeName == nullptr)
+						exeName = pname;
+					else
+						exeName++;
+				}
+			}
+			printf("  HWND: 0x%08X PID: 0x%X (%d) %ws TID: 0x%X (%d): %ws\n", (DWORD)(DWORD_PTR)hwnd, pid, pid, exeNameFound ? exeName : L"",  tid, tid, text);
 		}
 		return TRUE;
 		}, 0);
