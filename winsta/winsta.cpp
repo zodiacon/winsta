@@ -18,38 +18,40 @@ enum class WindowStationState {
 	Init = 9
 };
 
-void DoEnumDesktopWindows(PCWSTR name) {
-	auto hdesk = ::OpenDesktop(name, 0, FALSE, DESKTOP_ENUMERATE);
-	if (!hdesk) {
-		printf("--- failed to open desktop %ws (%d)\n", name, ::GetLastError());
-		return;
-	}
-	static WCHAR pname[MAX_PATH];
-	::EnumDesktopWindows(hdesk, [](auto hwnd, auto) -> BOOL {
-		static WCHAR text[128];
-		if (::IsWindowVisible(hwnd) && ::GetWindowText(hwnd, text, 128) > 0) {
-			DWORD pid;
-			auto tid = ::GetWindowThreadProcessId(hwnd, &pid);
-			auto hProcess = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-			BOOL exeNameFound = FALSE;
-			PWSTR exeName = nullptr;
-			if (hProcess) {
-				DWORD size = MAX_PATH;
-				exeNameFound = ::QueryFullProcessImageName(hProcess, 0, pname, &size);
-				::CloseHandle(hProcess);
-				if (exeNameFound) {
-					exeName = ::wcsrchr(pname, L'\\');
-					if (exeName == nullptr)
-						exeName = pname;
-					else
-						exeName++;
-				}
-			}
-			printf("  HWND: 0x%08X PID: 0x%X (%d) %ws TID: 0x%X (%d): %ws\n", (DWORD)(DWORD_PTR)hwnd, pid, pid, exeNameFound ? exeName : L"",  tid, tid, text);
+void DoEnumDesktopWindows(HWINSTA hWinSta, PCWSTR name) {
+	if (::SetProcessWindowStation(hWinSta)) {
+		auto hdesk = ::OpenDesktop(name, 0, FALSE, DESKTOP_READOBJECTS);
+		if (!hdesk) {
+			printf("--- failed to open desktop %ws (%d)\n", name, ::GetLastError());
+			return;
 		}
-		return TRUE;
-		}, 0);
-	::CloseDesktop(hdesk);
+		static WCHAR pname[MAX_PATH];
+		::EnumDesktopWindows(hdesk, [](auto hwnd, auto) -> BOOL {
+			static WCHAR text[128];
+			if (::IsWindowVisible(hwnd) && ::GetWindowText(hwnd, text, 128) > 0) {
+				DWORD pid;
+				auto tid = ::GetWindowThreadProcessId(hwnd, &pid);
+				auto hProcess = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+				BOOL exeNameFound = FALSE;
+				PWSTR exeName = nullptr;
+				if (hProcess) {
+					DWORD size = MAX_PATH;
+					exeNameFound = ::QueryFullProcessImageName(hProcess, 0, pname, &size);
+					::CloseHandle(hProcess);
+					if (exeNameFound) {
+						exeName = ::wcsrchr(pname, L'\\');
+						if (exeName == nullptr)
+							exeName = pname;
+						else
+							exeName++;
+					}
+				}
+				printf("  HWND: 0x%08X PID: 0x%X (%d) %ws TID: 0x%X (%d): %ws\n", (DWORD)(DWORD_PTR)hwnd, pid, pid, exeNameFound ? exeName : L"", tid, tid, text);
+			}
+			return TRUE;
+			}, 0);
+		::CloseDesktop(hdesk);
+	}
 }
 
 const char* StateToString(WindowStationState state) {
@@ -72,7 +74,7 @@ void EnumSessions() {
 	DWORD level = 1;
 	PWTS_SESSION_INFO_1 info;
 	DWORD count = 0;
-	if (!::WTSEnumerateSessionsEx(nullptr, &level, 0, &info, &count)) {
+	if (!::WTSEnumerateSessionsEx(WTS_CURRENT_SERVER_HANDLE, &level, 0, &info, &count)) {
 		printf("Error enumerating sessions (%d)\n", ::GetLastError());
 		return;
 	}
@@ -89,14 +91,15 @@ void EnumSessions() {
 void EnumWinStations() {
 	::EnumWindowStations([](auto name, auto) -> BOOL {
 		printf("Window station: %ws\n", name);
-		auto hWinSta = ::OpenWindowStation(name, FALSE, WINSTA_ENUMDESKTOPS);
+		static HWINSTA hWinSta;
+		hWinSta = ::OpenWindowStation(name, FALSE, WINSTA_ENUMDESKTOPS);
 		if (!hWinSta) {
-			printf("Error opening Winsta (%d)\n", ::GetLastError());
+			printf("Error opening Window Station (%d)\n", ::GetLastError());
 		}
 		else {
 			::EnumDesktops(hWinSta, [](auto deskname, auto) -> BOOL {
 				printf(" Desktop: %ws\n", deskname);
-				DoEnumDesktopWindows(deskname);
+				DoEnumDesktopWindows(hWinSta, deskname);
 				return TRUE;
 				}, 0);
 			::CloseWindowStation(hWinSta);
